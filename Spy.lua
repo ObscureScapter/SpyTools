@@ -12,21 +12,25 @@ local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 local Template = UI.Background.Players.Template
 Template.Parent = nil
+local Log = UI.Log
+Log.Parent = nil
+local Message = Log.Chat.Template
+Message.Parent = nil
 local ChatLogs = {}
 local Connections = {}
 local Viewing = nil
 
 -- functions
 
-local function Drag()
+local function Drag(UI: Frame)
     local MouseStart = UserInputService:GetMouseLocation()
-    local UIStart = UI.Background.Position
+    local UIStart = UI.Position
 
     while task.wait() and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
         local MouseNow = UserInputService:GetMouseLocation()
         local Offset = (MouseNow - MouseStart)
 
-        UI.Background:TweenPosition(UIStart + UDim2.new(0, Offset.X, 0, Offset.Y), "Out", "Linear", 0.01, true)
+        UI:TweenPosition(UIStart + UDim2.new(0, Offset.X, 0, Offset.Y), "Out", "Linear", 0.01, true)
     end
 end
 
@@ -36,6 +40,50 @@ local function Clean()
     end
 
     Camera.CameraSubject = LocalPlayer.Character
+end
+
+local function CreateLog(User: Player)
+    local NewLog = Log:Clone()
+
+    for _,v in ChatLogs[User.Name] do
+        local NewMessage = Message:Clone()
+        NewMessage.Messages.LayoutOrder = v[2]
+        NewMessage.Messages.Text = `[{os.date("%X", v[2])}]: {v[1]}`
+        NewMessage.Parent = NewLog.Chat
+    end
+
+    NewLog.Name = User.Name
+    NewLog.Title.Text = `{User.DisplayName} ({User.Name})'s Logs`
+    NewLog.Parent = UI
+
+    NewLog.Title.MouseButton1Down:Connect(function()
+        Drag(NewLog)
+    end)
+
+    local TempListen = User.Chatted:Connect(function(Text: string)
+        local Timer = math.floor(Workspace:GetServerTimeNow())
+        local NewMessage = Message:Clone()
+        NewMessage.Messages.LayoutOrder = Timer
+        NewMessage.Messages.Text = `[{os.date("%X", Timer)}]: {Text}`
+        NewMessage.Parent = NewLog.Chat
+    end)
+
+    NewLog.Close.MouseButton1Down:Connect(function()
+        TempListen:Disconnect()
+        NewLog:Destroy()
+    end)
+
+    local function LogSearch()
+        local Term = NewLog.Search.Box.Text:lower()
+
+        for _,v in NewLog.Chat:GetChildren() do
+            if not v:IsA("Frame") then continue end
+            v.Visible = v.Messages.Text:lower():find(Term)
+        end
+    end
+
+    LogSearch()
+    NewLog.Search.Box:GetPropertyChangedSignal("Text"):Connect(LogSearch)
 end
 
 local function UpdateSearch()
@@ -53,15 +101,23 @@ local function AddPlayer(Player: Player)
     end
 
     Player.Chatted:Connect(function(Message: string)
-        ChatLogs[Player.Name][Workspace:GetServerTimeNow()] = Message
+        local Timer = math.floor(Workspace:GetServerTimeNow())
+        table.insert(ChatLogs[Player.Name], {Message, Timer})
+
     end)
 
     local NewPlayer = Template:Clone()
     NewPlayer.Name = `{Player.DisplayName}_{Player.Name}_{Player.UserId}`
-    NewPlayer.User.Text = `{Player.DisplayName}({Player.Name})`
+    NewPlayer.User.Text = `{Player.DisplayName} ({Player.Name})`
     NewPlayer.Icon.Image = Players:GetUserThumbnailAsync(Player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size180x180)
     NewPlayer.Listen.Visible = Player:FindFirstChild("AudioDeviceInput")
     NewPlayer.Parent = UI.Background.Players
+
+    NewPlayer.Logs.MouseButton1Down:Connect(function()
+        if UI:FindFirstChild(Player.Name) then return end
+
+        CreateLog(Player)
+    end)
 
     NewPlayer.View.MouseButton1Down:Connect(function()
         Clean()
@@ -102,7 +158,9 @@ local function SetUp()
 end
 
 SetUp()
-UI.Background.Title.MouseButton1Down:Connect(Drag)
+UI.Background.Title.MouseButton1Down:Connect(function()
+    Drag(UI.Background)
+end)
 UI.Background.Search.Box:GetPropertyChangedSignal("Text"):Connect(UpdateSearch)
 Players.PlayerAdded:Connect(AddPlayer)
 Players.PlayerRemoving:Connect(function(Player: Player)
