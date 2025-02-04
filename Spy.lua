@@ -53,7 +53,7 @@ local function AddPlayer(Player: Player)
     end
 
     Player.Chatted:Connect(function(Message: string)
-        ChatLogs[Player.Name][tick()] = Message
+        ChatLogs[Player.Name][Workspace:GetServerTimeNow()] = Message
     end)
 
     local NewPlayer = Template:Clone()
