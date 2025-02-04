@@ -1,12 +1,20 @@
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
 -- services
 
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local Workspace = game:GetService("Workspace")
+local VoiceChatService = game:GetService("VoiceChatService")
 local UserInputService = game:GetService("UserInputService")
+
+if CoreGui:FindFirstChild("Spy") then warn("Spy Tool Already Loaded") return end
 
 -- variables
 
+local API = VoiceChatService.UseAudioApi == Enum.AudioApiRollout.Enabled
 local UI = game:GetObjects("rbxassetid://104460751016406")[1]
 local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
@@ -16,6 +24,8 @@ local Log = UI.Log
 Log.Parent = nil
 local Message = Log.Chat.Template
 Message.Parent = nil
+local Spectrum = UI.Spectrum
+Spectrum.Parent = nil
 local ChatLogs = {}
 local Connections = {}
 local Viewing = nil
@@ -42,25 +52,62 @@ local function Clean()
     Camera.CameraSubject = LocalPlayer.Character
 end
 
-local function CreateLog(User: Player)
-    local NewLog = Log:Clone()
+local function SpyAudio(Player: Player, Analyzer: AudioAnalyzer, ADI: AudioDeviceInput)
+    local NewSpy = Spectrum:Clone()
+    NewSpy.Name = `{Player.Name}_Audio`
+    NewSpy.Title.Text = `{Player.DisplayName} ({Player.Name})'s Audio`
 
-    for _,v in ChatLogs[User.Name] do
+    local Spying = true
+    task.defer(function()
+        while Spying and task.wait() do
+            local SizedPercent = Analyzer.PeakLevel / 1
+            local FloodFill = ( 1 - SizedPercent)
+
+            if Spying then
+                NewSpy.Info.Microphone.Fill.Size = UDim2.fromScale(1, SizedPercent)
+                NewSpy.Info.Microphone.Fill.ImageRectOffset = Vector2.new(0, (FloodFill * 84))
+            end
+        end
+    end)
+
+    local Emitter = Instance.new("AudioEmitter")
+    Emitter.Name = Player.Name
+    local Wire = Instance.new("Wire")
+    Wire.TargetInstance = Emitter
+    Wire.SourceInstance = ADI
+    Wire.Parent = Emitter
+    Emitter.Parent = Camera
+
+    NewSpy.Title.MouseButton1Down:Connect(function()
+        Drag(NewSpy)
+    end)
+
+    NewSpy.Close.MouseButton1Down:Connect(function()
+        Emitter:Destroy()
+        Spying = false
+        NewSpy:Destroy()
+    end)
+
+    NewSpy.Parent = UI
+end
+
+local function CreateLog(Player: Player)
+    local NewLog = Log:Clone()
+    NewLog.Name = `{Player.Name}_Log`
+    NewLog.Title.Text = `{Player.DisplayName} ({Player.Name})'s Logs`
+
+    for _,v in ChatLogs[Player.Name] do
         local NewMessage = Message:Clone()
         NewMessage.Messages.LayoutOrder = v[2]
         NewMessage.Messages.Text = `[{os.date("%X", v[2])}]: {v[1]}`
         NewMessage.Parent = NewLog.Chat
     end
 
-    NewLog.Name = User.Name
-    NewLog.Title.Text = `{User.DisplayName} ({User.Name})'s Logs`
-    NewLog.Parent = UI
-
     NewLog.Title.MouseButton1Down:Connect(function()
         Drag(NewLog)
     end)
 
-    local TempListen = User.Chatted:Connect(function(Text: string)
+    local TempListen = Player.Chatted:Connect(function(Text: string)
         local Timer = math.floor(Workspace:GetServerTimeNow())
         local NewMessage = Message:Clone()
         NewMessage.Messages.LayoutOrder = Timer
@@ -82,6 +129,7 @@ local function CreateLog(User: Player)
         end
     end
 
+    NewLog.Parent = UI
     LogSearch()
     NewLog.Search.Box:GetPropertyChangedSignal("Text"):Connect(LogSearch)
 end
@@ -103,18 +151,37 @@ local function AddPlayer(Player: Player)
     Player.Chatted:Connect(function(Message: string)
         local Timer = math.floor(Workspace:GetServerTimeNow())
         table.insert(ChatLogs[Player.Name], {Message, Timer})
+    end)
 
+    local Success, Enabled = pcall(function()
+        return VoiceChatService:IsVoiceEnabledForUserIdAsync(Player.UserId)
     end)
 
     local NewPlayer = Template:Clone()
     NewPlayer.Name = `{Player.DisplayName}_{Player.Name}_{Player.UserId}`
     NewPlayer.User.Text = `{Player.DisplayName} ({Player.Name})`
     NewPlayer.Icon.Image = Players:GetUserThumbnailAsync(Player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size180x180)
-    NewPlayer.Listen.Visible = Player:FindFirstChild("AudioDeviceInput")
+    NewPlayer.Listen.Visible = API and Success and Enabled
     NewPlayer.Parent = UI.Background.Players
 
+    if NewPlayer.Listen.Visible then
+        local ADI = Player:WaitForChild("AudioDeviceInput")
+        local Analyzer = Instance.new("AudioAnalyzer")
+        local Wire = Instance.new("Wire")
+        Wire.SourceInstance = ADI
+        Wire.TargetInstance = Analyzer
+        Wire.Parent = Analyzer
+        Analyzer.Parent = ADI
+
+        NewPlayer.Listen.MouseButton1Down:Connect(function()
+            if UI:FindFirstChild(`{Player.Name}_Audio`) then return end
+            
+            SpyAudio(Player, Analyzer, ADI)
+        end)
+    end
+
     NewPlayer.Logs.MouseButton1Down:Connect(function()
-        if UI:FindFirstChild(Player.Name) then return end
+        if UI:FindFirstChild(`{Player.Name}_Log`) then return end
 
         CreateLog(Player)
     end)
@@ -156,6 +223,12 @@ local function SetUp()
 
     UI.Parent = CoreGui
 end
+
+UserInputService.InputBegan:Connect(function(Input: InputObject)
+    if Input.KeyCode == Enum.KeyCode.RightControl then
+        UI.Enabled = not UI.Enabled
+    end
+end)
 
 SetUp()
 UI.Background.Title.MouseButton1Down:Connect(function()
